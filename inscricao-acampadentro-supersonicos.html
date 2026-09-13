@@ -490,6 +490,7 @@
       </div>
       <div class="admin-toolbar">
         <input type="text" id="searchBox" placeholder="Buscar por nome...">
+        <button type="button" id="exportPdfBtn">Exportar PDF</button>
         <button type="button" id="exportCsvBtn">Exportar CSV</button>
         <button type="button" id="refreshBtn">Atualizar</button>
       </div>
@@ -498,6 +499,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 (function(){
   // decorative clouds
@@ -789,6 +791,165 @@
     drawList(currentList.filter(r=>r.nome.toLowerCase().includes(q)));
   });
   document.getElementById('refreshBtn').addEventListener('click', renderAdmin);
+
+  function fmtDateTime(iso){
+    if(!iso) return '-';
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('pt-BR') + ', ' + d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  }
+
+  async function buildPdfBlob(list){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    const colGap = 16;
+    const colW = (pageW - margin*2 - colGap) / 2;
+    let y = margin;
+
+    const OLIVE = [68,83,40];
+    const MUTED = [110,115,95];
+    const ORANGE = [200,90,25];
+    const LINE = [216,206,176];
+
+    function ensureSpace(h){
+      if(y + h > pageH - margin){
+        doc.addPage();
+        y = margin;
+      }
+    }
+
+    // header
+    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...OLIVE);
+    doc.text('Inscrições — Acampadentro Supersônicos', margin, y);
+    y += 18;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...MUTED);
+    doc.text('Gerado em ' + fmtDateTime(new Date().toISOString()) + ' · ' + list.length + ' inscrição(ões)', margin, y);
+    y += 22;
+
+    function field(x, w, label, value){
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...MUTED);
+      doc.text(label.toUpperCase(), x, y);
+      doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(30,32,20);
+      const lines = doc.splitTextToSize(String(value||'-'), w);
+      doc.text(lines, x, y+13);
+      return 13 + lines.length*12;
+    }
+
+    for(const r of list){
+      // measure content height first by simulating (simplified: fixed row heights + dynamic wrap for long fields)
+      doc.setFont('helvetica','bold'); doc.setFontSize(13);
+      const nameLines = doc.splitTextToSize(r.nome + '  (' + r.idade + ' anos)', pageW - margin*2);
+      let cardH = 14 + nameLines.length*15 + 10;
+
+      // row heights (approx, using wrap calc)
+      function rowHeight(pairs){
+        let h = 0;
+        pairs.forEach(([label,value])=>{
+          doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+          const lines = doc.splitTextToSize(String(value||'-'), colW);
+          h = Math.max(h, 13 + lines.length*12);
+        });
+        return h + 10;
+      }
+
+      const rowsData = [
+        [['Nº inscrição', r.id], ['Data de nascimento', r.data_nascimento || '-']],
+        [['Responsável', r.responsavel + ' (' + r.parentesco + ')'], ['Telefone responsável', r.tel_responsavel]],
+        [['Telefone emergência', r.tel_emergencia], ['Autoriza fotos/vídeos', r.autorizacao_imagem ? 'Sim' : 'Não']],
+        [['Inscrito em', fmtDateTime(r.created_at)], ['Autorização de participação', 'Confirmada']],
+      ];
+      rowsData.forEach(pairs => cardH += rowHeight(pairs));
+
+      const highlights = [];
+      if(r.alergia === 'Sim') highlights.push('⚠ Alergia: ' + (r.qual_alergia || '-'));
+      if(r.restricao === 'Sim') highlights.push('⚠ Restrição alimentar: ' + (r.qual_restricao || '-'));
+      if(r.medicacao === 'Sim') highlights.push('⚠ Medicação: ' + (r.medicamento_detalhe || '-'));
+      const highlightLineSets = highlights.map(h => doc.splitTextToSize(h, pageW - margin*2 - 20));
+      highlightLineSets.forEach(lines => cardH += lines.length*12 + 14);
+
+      let infoLines = [];
+      if(r.info_importante){
+        doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+        infoLines = doc.splitTextToSize('Informações importantes: ' + r.info_importante, pageW - margin*2);
+        cardH += infoLines.length*12 + 10;
+      }
+      cardH += 16; // bottom padding
+
+      ensureSpace(cardH);
+      const cardTop = y;
+      const cardX = margin;
+      const cardW = pageW - margin*2;
+
+      y += 16;
+      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...OLIVE);
+      doc.text(nameLines, cardX + 14, y);
+      y += nameLines.length*15 + 8;
+
+      rowsData.forEach(pairs=>{
+        const h1 = field(cardX+14, colW, pairs[0][0], pairs[0][1]);
+        const h2 = field(cardX+14+colW+colGap, colW, pairs[1][0], pairs[1][1]);
+        y += Math.max(h1,h2) + 10;
+      });
+
+      highlightLineSets.forEach((lines, i)=>{
+        const boxH = lines.length*12 + 14;
+        doc.setFillColor(255,238,214);
+        doc.roundedRect(cardX+14, y-11, cardW-28, boxH, 5, 5, 'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...ORANGE);
+        doc.text(lines, cardX+22, y);
+        y += boxH + 6;
+      });
+
+      if(infoLines.length){
+        doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(60,62,50);
+        doc.text(infoLines, cardX+14, y);
+        y += infoLines.length*12 + 6;
+      }
+
+      doc.setDrawColor(...OLIVE); doc.setLineWidth(1.2);
+      doc.roundedRect(cardX, cardTop, cardW, cardH-6, 8, 8, 'S');
+
+      y = cardTop + cardH + 14;
+    }
+
+    return doc.output('blob');
+  }
+
+  document.getElementById('exportPdfBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('exportPdfBtn');
+    const original = btn.textContent;
+    btn.textContent = 'Gerando...';
+    btn.disabled = true;
+    try{
+      const blob = await buildPdfBlob(currentList);
+      const fileName = 'inscricoes_acampadentro_supersonicos.pdf';
+      const file = new File([blob], fileName, {type:'application/pdf'});
+
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({
+          files: [file],
+          title: 'Inscrições — Acampadentro Supersônicos',
+          text: 'Segue o relatório de inscrições do Acampadentro Supersônicos.'
+        });
+      }else{
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = fileName;
+        link.click();
+        window.open('https://wa.me/', '_blank');
+        alert('O PDF foi baixado. Abra o WhatsApp e anexe o arquivo manualmente (o compartilhamento direto não é suportado neste navegador).');
+      }
+    }catch(e){
+      if(e && e.name !== 'AbortError'){
+        alert('Não foi possível gerar o PDF agora. Tente novamente.');
+      }
+    }
+    btn.textContent = original;
+    btn.disabled = false;
+  });
 
   document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
     const headers = ['Nome','Nascimento','Idade','Responsavel','Parentesco','TelResponsavel','TelEmergencia','Alergia','QualAlergia','Restricao','QualRestricao','Medicacao','MedicamentoDetalhe','InfoImportante','AutorizaFotos','Numero'];
