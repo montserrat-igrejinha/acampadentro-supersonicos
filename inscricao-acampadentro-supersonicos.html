@@ -108,6 +108,21 @@
   .form-section .head h2{font-size:1.5rem;}
   .form-section .head .sub{color:var(--muted); font-size:.88rem; margin-top:6px;}
 
+  .pix-section{padding:8px 20px 0;}
+  .pix-card{padding:24px 22px; text-align:center;}
+  .pix-title{font-family:'Baloo 2',sans-serif; font-weight:700; font-size:1.15rem; color:var(--olive-d); margin-bottom:6px;}
+  .pix-sub{color:var(--muted); font-size:.85rem; margin-bottom:14px; line-height:1.4;}
+  .pix-value{font-family:'Baloo 2',sans-serif; font-weight:800; font-size:2rem; color:var(--orange); margin-bottom:16px;}
+  .pix-row{display:flex; justify-content:space-between; gap:10px; font-size:.85rem; padding:8px 0; border-bottom:1px dashed var(--line); text-align:left;}
+  .pix-row span{color:var(--muted); font-weight:600;}
+  .pix-row b{color:var(--olive-d); font-weight:700; word-break:break-all; text-align:right;}
+  .pix-copy-btn{
+    width:100%; margin-top:16px; background:var(--olive); color:#fff; border:none; font-family:'Baloo 2',sans-serif;
+    font-weight:700; font-size:.92rem; padding:14px; border-radius:100px; box-shadow:0 5px 0 var(--olive-d); cursor:pointer;
+  }
+  .pix-copy-btn.copied{background:var(--green-ok, #3f9142); box-shadow:0 5px 0 #2c6c2f;}
+  .pix-note{font-size:.76rem; color:var(--muted); margin-top:12px; line-height:1.4;}
+
   .form-card{padding:22px 18px;}
   .fgroup{margin-bottom:26px;}
   .fgroup-title{
@@ -276,12 +291,27 @@
   </div>
 </section>
 
+<!-- PIX -->
+<section class="pix-section">
+  <div class="card pix-card">
+    <div class="pix-title">💰 Confirmação da vaga</div>
+    <div class="pix-sub">Faça o Pix abaixo para garantir a vaguinha do seu piloto ou pilota mirim.</div>
+    <div class="pix-value">R$ 45,00</div>
+    <div class="pix-row"><span>Banco</span><b>Santander</b></div>
+    <div class="pix-row"><span>Nome</span><b>Josiane Marques da Silva</b></div>
+    <div class="pix-row"><span>Chave (e-mail)</span><b id="pixChaveTxt">josianemarques025@gmail.com</b></div>
+    <button type="button" class="pix-copy-btn press" id="pixCopyBtn">Copiar chave Pix</button>
+    <div class="pix-note">Depois de pagar, envie o comprovante pelo WhatsApp da líder Josi.</div>
+  </div>
+</section>
+
 <!-- FORM -->
 <section class="form-section" id="inscricao">
   <div class="head">
     <h2>Ficha de inscrição</h2>
     <div class="sub">Preenchida pelo responsável pela criança.</div>
   </div>
+
 
   <div class="card form-card">
     <form id="regForm">
@@ -482,8 +512,38 @@
     cloudsEl.appendChild(d);
   });
 
-  const STORAGE_KEY = 'acampadentro_supersonicos_2026_inscricoes';
+  const SUPABASE_URL = 'https://cnzhfxqusjxyzqodnqsu.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_kcXfNXmaPi9idlICcyM6vA_JKuCOt-t';
+  const SUPABASE_TABLE = SUPABASE_URL + '/rest/v1/inscricoes_acampadentro';
   const ADMIN_PASS = 'montserrat2026';
+
+  function supabaseHeaders(extra){
+    return Object.assign({
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json'
+    }, extra || {});
+  }
+
+  document.getElementById('pixCopyBtn').addEventListener('click', async ()=>{
+    const chave = document.getElementById('pixChaveTxt').textContent.trim();
+    const btn = document.getElementById('pixCopyBtn');
+    try{
+      await navigator.clipboard.writeText(chave);
+    }catch(e){
+      const ta = document.createElement('textarea');
+      ta.value = chave;
+      ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    const original = btn.textContent;
+    btn.textContent = 'Chave copiada! ✅';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent = original; btn.classList.remove('copied'); }, 2200);
+  });
 
   document.querySelectorAll('.go-inscricao').forEach(b=>{
     b.addEventListener('click', ()=>{
@@ -538,16 +598,34 @@
     return row.dataset.value || '';
   }
 
-  async function getList(){
+  async function saveToSupabase(record){
     try{
-      const res = await window.storage.get(STORAGE_KEY, true);
-      return res ? JSON.parse(res.value) : [];
+      const res = await fetch(SUPABASE_TABLE, {
+        method: 'POST',
+        headers: supabaseHeaders({'Prefer': 'return=minimal'}),
+        body: JSON.stringify(record)
+      });
+      return res.ok;
+    }catch(e){ return false; }
+  }
+
+  async function fetchFromSupabase(){
+    try{
+      const res = await fetch(SUPABASE_TABLE + '?select=*&order=created_at.desc', {
+        headers: supabaseHeaders()
+      });
+      if(!res.ok) return [];
+      return await res.json();
     }catch(e){ return []; }
   }
-  async function saveList(list){
+
+  async function deleteFromSupabase(id){
     try{
-      await window.storage.set(STORAGE_KEY, JSON.stringify(list), true);
-      return true;
+      const res = await fetch(SUPABASE_TABLE + '?id=eq.' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: supabaseHeaders()
+      });
+      return res.ok;
     }catch(e){ return false; }
   }
 
@@ -589,16 +667,24 @@
 
     const record = {
       id: 'AS'+Date.now().toString().slice(-6),
-      created_at: new Date().toISOString(),
-      nome, dataNascimento, idade, responsavel, parentesco, telResponsavel, telEmergencia,
-      alergia, qualAlergia, restricao, qualRestricao,
-      medicacao, medicamentoDetalhe, medicamentoCheck,
-      infoImportante, autorizacaoParticipacao, autorizacaoImagem
+      nome, data_nascimento: dataNascimento, idade, responsavel, parentesco,
+      tel_responsavel: telResponsavel, tel_emergencia: telEmergencia,
+      alergia, qual_alergia: qualAlergia, restricao, qual_restricao: qualRestricao,
+      medicacao, medicamento_detalhe: medicamentoDetalhe, medicamento_check: medicamentoCheck,
+      info_importante: infoImportante,
+      autorizacao_participacao: autorizacaoParticipacao, autorizacao_imagem: autorizacaoImagem
     };
 
-    const list = await getList();
-    list.unshift(record);
-    await saveList(list);
+    document.getElementById('submitBtn').disabled = true;
+    const saved = await saveToSupabase(record);
+    document.getElementById('submitBtn').disabled = false;
+
+    if(!saved){
+      formError.textContent = 'Não foi possível enviar agora. Verifique sua internet e tente novamente.';
+      formError.style.display='block';
+      formError.scrollIntoView({behavior:'smooth', block:'center'});
+      return;
+    }
 
     document.getElementById('passNome').textContent = nome;
     document.getElementById('passIdade').textContent = idade + ' anos';
@@ -643,7 +729,7 @@
   let currentList = [];
 
   async function renderAdmin(){
-    currentList = await getList();
+    currentList = await fetchFromSupabase();
     document.getElementById('statTotal').textContent = currentList.length;
     document.getElementById('statAlergia').textContent = currentList.filter(r=>r.alergia==='Sim').length;
     document.getElementById('statMed').textContent = currentList.filter(r=>r.medicacao==='Sim').length;
@@ -661,19 +747,19 @@
         <div class="rtop">
           <div>
             <div class="rname">${r.nome}</div>
-            <div class="rmeta">${r.idade} anos · Resp: ${r.responsavel} · ${r.telResponsavel}</div>
+            <div class="rmeta">${r.idade} anos · Resp: ${r.responsavel} · ${r.tel_responsavel}</div>
           </div>
           <button type="button" class="rtoggle" data-toggle="${r.id}">Ver</button>
         </div>
         <div class="reg-detail" id="detail-${r.id}">
-          <div><b>Nascimento:</b> ${r.dataNascimento || '-'}</div>
+          <div><b>Nascimento:</b> ${r.data_nascimento || '-'}</div>
           <div><b>Parentesco:</b> ${r.parentesco}</div>
-          <div><b>Telefone emergência:</b> ${r.telEmergencia}</div>
-          <div><b>Alergia:</b> ${r.alergia}${r.qualAlergia ? ' — '+r.qualAlergia : ''}</div>
-          <div><b>Restrição alimentar:</b> ${r.restricao}${r.qualRestricao ? ' — '+r.qualRestricao : ''}</div>
-          <div><b>Medicação:</b> ${r.medicacao}${r.medicamentoDetalhe ? ' — '+r.medicamentoDetalhe : ''}</div>
-          <div><b>Info importante:</b> ${r.infoImportante || '-'}</div>
-          <div><b>Autoriza fotos/vídeos:</b> ${r.autorizacaoImagem ? 'Sim' : 'Não'}</div>
+          <div><b>Telefone emergência:</b> ${r.tel_emergencia}</div>
+          <div><b>Alergia:</b> ${r.alergia}${r.qual_alergia ? ' — '+r.qual_alergia : ''}</div>
+          <div><b>Restrição alimentar:</b> ${r.restricao}${r.qual_restricao ? ' — '+r.qual_restricao : ''}</div>
+          <div><b>Medicação:</b> ${r.medicacao}${r.medicamento_detalhe ? ' — '+r.medicamento_detalhe : ''}</div>
+          <div><b>Info importante:</b> ${r.info_importante || '-'}</div>
+          <div><b>Autoriza fotos/vídeos:</b> ${r.autorizacao_imagem ? 'Sim' : 'Não'}</div>
           <div><b>Nº inscrição:</b> ${r.id}</div>
           <button type="button" class="del-btn" data-del="${r.id}">Excluir inscrição</button>
         </div>
@@ -689,8 +775,8 @@
     el.querySelectorAll('[data-del]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         if(!confirm('Excluir esta inscrição?')) return;
+        await deleteFromSupabase(btn.dataset.del);
         currentList = currentList.filter(r=>r.id !== btn.dataset.del);
-        await saveList(currentList);
         drawList(currentList);
       });
     });
@@ -704,7 +790,7 @@
 
   document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
     const headers = ['Nome','Nascimento','Idade','Responsavel','Parentesco','TelResponsavel','TelEmergencia','Alergia','QualAlergia','Restricao','QualRestricao','Medicacao','MedicamentoDetalhe','InfoImportante','AutorizaFotos','Numero'];
-    const rows = currentList.map(r=>[r.nome,r.dataNascimento,r.idade,r.responsavel,r.parentesco,r.telResponsavel,r.telEmergencia,r.alergia,r.qualAlergia,r.restricao,r.qualRestricao,r.medicacao,r.medicamentoDetalhe,r.infoImportante,(r.autorizacaoImagem?'Sim':'Nao'),r.id]);
+    const rows = currentList.map(r=>[r.nome,r.data_nascimento,r.idade,r.responsavel,r.parentesco,r.tel_responsavel,r.tel_emergencia,r.alergia,r.qual_alergia,r.restricao,r.qual_restricao,r.medicacao,r.medicamento_detalhe,r.info_importante,(r.autorizacao_imagem?'Sim':'Nao'),r.id]);
     const csv = [headers.join(';')].concat(rows.map(r=>r.map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(';'))).join('\n');
     const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
     const link = document.createElement('a');
